@@ -243,8 +243,8 @@
   <!-- 設定提示 (部署後可刪除) -->
   <div class="setup-notice">
     <strong>⚙️ 使用前請設定：</strong><br>
-    1. 開啟此 HTML 檔案，搜尋 <code>YOUR_GEMINI_API_KEY</code> 替換成你的 Gemini Key<br>
-    2. 搜尋 <code>YOUR_APPS_SCRIPT_URL</code> 替換成你的 Apps Script Web App 網址
+    1. 開啟此 HTML 檔案，搜尋 <code>AIzaSyDT812NHOiqRH0rkXSk1JVp70XZWt6apA8</code> 替換成你的 Gemini Key<br>
+    2. 搜尋 <code>https://script.google.com/macros/s/AKfycbzRjbzEWOn-O8jEaFqsmJbMxp9MdX9y0-MvkUgJPuIqziaREVRAfXE9gOBhQrTkrEMT/exec</code> 替換成你的 Apps Script Web App 網址
   </div>
 
   <div id="toast" class="toast">✦ <span>已成功送入靈感宇宙！</span></div>
@@ -399,13 +399,31 @@ document.getElementById('file-input').addEventListener('change', function(e) {
 async function doAnalyze() {
   const url = document.getElementById('url-input').value.trim();
   const box = document.getElementById('aibox'), btn = document.getElementById('abtn');
-  if (!url) { box.textContent = '請先填入來源網址！'; return; }
+  const preview = document.getElementById('preview');
+  const hasImage = preview.style.display !== 'none' && preview.src && preview.src.startsWith('data:');
+
+  if (!hasImage && !url) { box.textContent = '請先上傳截圖，或填入來源網址！'; return; }
   btn.disabled = true; btn.textContent = '分析中...';
   box.textContent = 'AI 正在分析視覺風格...'; box.classList.add('loading');
+
   try {
+    const prompt = '你是一位專業平面設計師助理。請用繁體中文描述這則設計作品的視覺風格（60字以內）。請包含：版型特色、色彩運用、設計手法、整體氛圍。只需輸出描述文字，不要加任何前綴。';
+    let parts = [];
+
+    if (hasImage) {
+      const base64 = preview.src.split(',')[1];
+      const mimeType = preview.src.split(';')[0].split(':')[1];
+      parts = [
+        { inline_data: { mime_type: mimeType, data: base64 } },
+        { text: prompt }
+      ];
+    } else {
+      parts = [{ text: prompt + '\n\n來源網址（請根據平台特性描述）：' + url }];
+    }
+
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: `你是一位專業平面設計師助理。根據以下網址，用繁體中文描述這則設計作品的視覺風格（60字以內）。請包含：版型特色、色彩運用、設計手法、整體氛圍。如果無法存取網址，請根據網址來源平台給出通用描述。網址：${url}\n只需輸出描述文字，不要加任何前綴。` }] }] })
+      body: JSON.stringify({ contents: [{ parts }] })
     });
     const d = await res.json();
     box.textContent = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '無法取得描述，請手動填寫。';
