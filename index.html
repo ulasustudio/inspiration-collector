@@ -238,9 +238,24 @@
     <div class="hdr-star">✦ ✦ ✦</div>
     <h1>靈感搜集器</h1>
     <p>貼網址或上傳截圖，一鍵歸檔到靈感宇宙</p>
+    <button onclick="toggleSettings()" style="margin-top:12px;padding:6px 18px;border-radius:99px;border:1px solid rgba(250,247,242,.4);background:transparent;color:#FAF7F2;font-size:12px;cursor:pointer;font-family:sans-serif;">⚙️ 設定 API Key</button>
   </div>
 
 
+
+
+  <!-- 設定區塊 -->
+  <div id="settings-panel" style="display:none;">
+    <div class="sec">⚙️ 設定</div>
+    <div class="card">
+      <div class="card-title">🔑 API 設定</div>
+      <div class="slbl">Gemini API Key</div>
+      <input type="text" id="input-gemini-key" placeholder="AIzaSy..." style="margin-bottom:10px;" />
+      <div class="slbl">Apps Script 網址</div>
+      <input type="text" id="input-apps-url" placeholder="https://script.google.com/macros/s/..." style="margin-bottom:14px;" />
+      <button onclick="saveSettings()" style="width:100%;padding:12px;border-radius:12px;background:#3D2B1A;color:#FFF8C2;border:none;font-size:15px;cursor:pointer;font-family:sans-serif;">💾 儲存設定</button>
+    </div>
+  </div>
 
   <div id="toast" class="toast">✦ <span>已成功送入靈感宇宙！</span></div>
 
@@ -356,8 +371,8 @@
 </div>
 
 <script>
-const GEMINI_API_KEY = 'AIzaSyBbd3MrSFj-uojSZ5vIlZuYLd2063WfbgU';
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzRjbzEWOn-O8jEaFqsmJbMxp9MdX9y0-MvkUgJPuIqziaREVRAfXE9gOBhQrTkrEMT/exec';
+const GEMINI_API_KEY = localStorage.getItem('gemini_key') || '';
+const APPS_SCRIPT_URL = localStorage.getItem('apps_script_url') || '';
 
 const TOPICS = {
   social: ['時尚','美食','旅遊','美妝','生活風格','節慶','活動','攝影'],
@@ -370,24 +385,67 @@ function switchCat(c, btn) {
   document.getElementById('t-topic').value = '';
   document.querySelectorAll('.ctab').forEach(t => t.classList.remove('on'));
   btn.classList.add('on');
-  renderTopics();
+  
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
+}
+
+renderTopics();
 }
 function renderTopics() {
   document.getElementById('topic-grid').innerHTML = TOPICS[cat].map(t =>
     `<button class="chip${t===sel?' on':''}" onclick="selTopic('${t}')">${t}</button>`
   ).join('');
 }
-function selTopic(t) { sel = t; document.getElementById('t-topic').value = t; renderTopics(); }
+function selTopic(t) { sel = t; document.getElementById('t-topic').value = t; 
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
+}
+
+renderTopics(); }
 function setR(n) { rating = n; document.querySelectorAll('.star').forEach((s,i) => s.classList.toggle('on', i < n)); }
 
 document.getElementById('file-input').addEventListener('change', function(e) {
-  const f = e.target.files[0]; if (!f) return;
+  const f = e.target.files[0];
+  if (!f) return;
   const r = new FileReader();
-  r.onload = ev => {
+  r.onload = function(ev) {
     const p = document.getElementById('preview');
-    p.src = ev.target.result; p.style.display = 'block';
+    p.setAttribute('src', ev.target.result);
+    p.style.cssText = 'display:block; width:100%; max-height:200px; object-fit:cover; border-radius:10px; margin-top:10px;';
     document.getElementById('upload-area').style.display = 'none';
   };
+  r.onerror = function() { alert('圖片讀取失敗，請重試！'); };
   r.readAsDataURL(f);
 });
 
@@ -416,7 +474,7 @@ async function doAnalyze() {
       parts = [{ text: prompt + '\n\n來源網址（請根據平台特性描述）：' + url }];
     }
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${AIzaSyBbd3MrSFj-uojSZ5vIlZuYLd2063WfbgU}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts }] })
     });
@@ -448,7 +506,7 @@ async function doSubmit() {
     date:     new Date().toISOString().split('T')[0]
   };
   try {
-    await fetch(https://script.google.com/macros/s/AKfycbzRjbzEWOn-O8jEaFqsmJbMxp9MdX9y0-MvkUgJPuIqziaREVRAfXE9gOBhQrTkrEMT/exec, {
+    await fetch(APPS_SCRIPT_URL, {
       method: 'POST', mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -463,11 +521,51 @@ async function doSubmit() {
     document.getElementById('upload-area').style.display = 'block';
     setR(0); sel = ''; document.getElementById('t-topic').value = '';
     ['t-layout','t-color','t-platform','t-type'].forEach(id => document.getElementById(id).value = '');
-    renderTopics();
+    
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
+}
+
+renderTopics();
   } catch(e) {
     alert('儲存失敗，請確認 Apps Script Web App 網址是否正確。');
   }
   btn.disabled = false; btn.innerHTML = '🚀 儲存到靈感宇宙';
+}
+
+
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
 }
 
 renderTopics();
