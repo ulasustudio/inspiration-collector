@@ -440,10 +440,609 @@ document.getElementById('file-input').addEventListener('change', function(e) {
   if (!f) return;
   const r = new FileReader();
   r.onload = function(ev) {
-    const p = document.getElementById('preview');
-    p.setAttribute('src', ev.target.result);
-    p.style.cssText = 'display:block; width:100%; max-height:200px; object-fit:cover; border-radius:10px; margin-top:10px;';
-    document.getElementById('upload-area').style.display = 'none';
+    // 壓縮圖片再顯示，避免 base64 太大
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      const MAX = 800;
+      let w = img.width, h = img.height;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const compressed = canvas.toDataURL('image/jpeg', 0.7);
+      const p = document.getElementById('preview');
+      p.setAttribute('src', compressed);
+      p.style.cssText = 'display:block; width:100%; max-height:200px; object-fit:cover; border-radius:10px; margin-top:10px;';
+      document.getElementById('upload-area').style.display = 'none';
+    };
+    img.src = ev.target.result;
+  };
+  r.onerror = function() { alert('圖片讀取失敗，請重試！'); };
+  r.readAsDataURL(f);
+});
+
+async function doAnalyze() {
+  const url = document.getElementById('url-input').value.trim();
+  const box = document.getElementById('aibox'), btn = document.getElementById('abtn');
+  const preview = document.getElementById('preview');
+  const hasImage = preview.style.display !== 'none' && preview.src && preview.src.startsWith('data:');
+
+  if (!hasImage && !url) { box.textContent = '請先上傳截圖，或填入來源網址！'; return; }
+  btn.disabled = true; btn.textContent = '分析中...';
+  box.textContent = 'AI 正在分析視覺風格...'; box.classList.add('loading');
+
+  try {
+    const prompt = '你是一位專業平面設計師助理。請用繁體中文描述這則設計作品的視覺風格（60字以內）。請包含：版型特色、色彩運用、設計手法、整體氛圍。只需輸出描述文字，不要加任何前綴。';
+    let parts = [];
+
+    if (hasImage) {
+      const base64 = preview.src.split(',')[1];
+      const mimeType = preview.src.split(';')[0].split(':')[1];
+      parts = [
+        { inline_data: { mime_type: mimeType, data: base64 } },
+        { text: prompt }
+      ];
+    } else {
+      parts = [{ text: prompt + '\n\n來源網址（請根據平台特性描述）：' + url }];
+    }
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts }] })
+    });
+    const d = await res.json();
+    box.textContent = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '無法取得描述，請手動填寫。';
+    box.classList.remove('loading');
+  } catch(e) {
+    box.textContent = '分析失敗，請手動填寫風格描述。';
+    box.classList.remove('loading');
+  }
+  btn.disabled = false; btn.textContent = '✦ 重新分析';
+}
+
+async function doSubmit() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) { alert('請填入來源網址！'); return; }
+  const btn = document.getElementById('sbtn');
+  btn.disabled = true; btn.textContent = '送出中...';
+  const payload = {
+    url,
+    platform: document.getElementById('t-platform').value,
+    layout:   document.getElementById('t-layout').value,
+    color:    document.getElementById('t-color').value,
+    topic:    document.getElementById('t-topic').value,
+    type:     document.getElementById('t-type').value,
+    aiDesc:   document.getElementById('aibox').textContent,
+    note:     document.getElementById('note').value,
+    rating,
+    date:     new Date().toISOString().split('T')[0]
+  };
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const t = document.getElementById('toast');
+    t.style.display = 'flex';
+    setTimeout(() => t.style.display = 'none', 3000);
+    document.getElementById('url-input').value = '';
+    document.getElementById('aibox').textContent = '按下「自動分析風格」後，AI 會自動描述這則設計的視覺風格。';
+    document.getElementById('note').value = '';
+    document.getElementById('preview').style.display = 'none';
+    document.getElementById('upload-area').style.display = 'block';
+    setR(0); sel = ''; document.getElementById('t-topic').value = '';
+    ['t-layout','t-color','t-platform','t-type'].forEach(id => document.getElementById(id).value = '');
+    
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
+}
+
+renderTopics();
+  } catch(e) {
+    alert('儲存失敗，請確認 Apps Script Web App 網址是否正確。');
+  }
+  btn.disabled = false; btn.innerHTML = '🚀 儲存到靈感宇宙';
+}
+
+
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
+}
+
+renderTopics();
+</script>
+</body>
+</html><!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>✦ 靈感搜集器</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --red: #C94A2A;
+    --dark: #3D2B1A;
+    --cream: #FAF7F2;
+    --yellow: #FFF8C2;
+    --peach: #F2C9B8;
+    --card: #FAF7F2;
+    --input-bg: #FFF8F4;
+    --input-border: #E8C9B8;
+    --muted: #A0876A;
+    --ai-bg: #FFF0E6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--red); }
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    background: var(--red);
+    min-height: 100vh;
+    padding-bottom: 3rem;
+  }
+  .app { max-width: 480px; margin: 0 auto; padding: 1rem 1.2rem; }
+
+  /* Header */
+  .hdr { text-align: center; padding: 2.2rem 0 1.4rem; margin-bottom: 1.4rem; }
+  .hdr-star { font-size: 32px; color: var(--cream); opacity: .7; margin-bottom: 8px; letter-spacing: .2em; }
+  .hdr h1 {
+    font-family: 'Noto Serif TC', serif;
+    font-size: 26px; font-weight: 500;
+    color: var(--cream); letter-spacing: .12em;
+    margin-bottom: 8px;
+  }
+  .hdr p { font-size: 13px; color: var(--peach); letter-spacing: .04em; }
+
+  /* Section label */
+  .sec {
+    font-size: 10px; font-weight: 500;
+    color: var(--peach); letter-spacing: .14em;
+    text-transform: uppercase; margin: 0 0 7px 4px;
+  }
+
+  /* Card */
+  .card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 1.1rem 1.3rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 12px rgba(61,43,26,.18);
+  }
+  .card-title {
+    font-size: 13px; font-weight: 500;
+    color: var(--red); margin-bottom: 10px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .card-title svg { width:15px; height:15px; flex-shrink:0; }
+
+  /* Inputs */
+  input[type=url], select, textarea {
+    width: 100%; font-size: 15px;
+    font-family: 'Noto Sans TC', sans-serif;
+    border-radius: 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--dark);
+    padding: 10px 12px;
+    transition: border-color .2s;
+    -webkit-appearance: none;
+  }
+  input[type=url]:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--red);
+  }
+  textarea { resize: none; height: 78px; font-size: 14px; line-height: 1.6; }
+  select { cursor: pointer; }
+
+  /* Tag grid */
+  .tgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+  .slbl { font-size: 11px; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+
+  /* Upload */
+  .upload {
+    border: 1.5px dashed var(--input-border);
+    border-radius: 10px; padding: 1.4rem;
+    text-align: center; cursor: pointer;
+    color: var(--muted); font-size: 14px;
+    position: relative; background: var(--input-bg);
+    transition: border-color .2s, background .2s;
+  }
+  .upload:hover { border-color: var(--red); background: #fff5ef; }
+  .upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .upload-icon { font-size: 28px; margin-bottom: 7px; display: block; }
+  .preview {
+    width: 100%; border-radius: 10px;
+    margin-top: 10px; max-height: 200px;
+    object-fit: cover; display: none;
+  }
+
+  /* Analyze button */
+  .abtn {
+    width: 100%; padding: 13px;
+    font-size: 15px; font-weight: 500;
+    font-family: 'Noto Sans TC', sans-serif;
+    border-radius: 12px;
+    background: var(--red); color: var(--cream);
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-bottom: 1rem;
+    transition: opacity .2s, transform .1s;
+    letter-spacing: .04em;
+  }
+  .abtn:hover { opacity: .88; }
+  .abtn:active { transform: scale(.98); }
+  .abtn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* AI result box */
+  .aibox {
+    background: var(--ai-bg);
+    border-radius: 10px; padding: 13px;
+    font-size: 14px; color: var(--dark);
+    line-height: 1.7; min-height: 65px;
+    margin-top: 8px; border: 1px solid var(--input-border);
+  }
+  .aibox.loading { color: var(--muted); font-style: italic; }
+
+  /* Badge */
+  .badge {
+    display: inline-block; font-size: 11px;
+    padding: 3px 10px; border-radius: 99px;
+    background: #FFE8D6; color: var(--red); font-weight: 500;
+  }
+
+  /* Divider */
+  .div { height: 1px; background: var(--input-border); margin: .9rem 0; }
+
+  /* Category tabs */
+  .ctabs { display: flex; gap: 7px; margin-bottom: 11px; }
+  .ctab {
+    font-size: 12px; padding: 6px 16px;
+    border-radius: 99px;
+    border: 1px solid var(--input-border);
+    background: transparent; cursor: pointer;
+    color: var(--muted);
+    font-family: 'Noto Sans TC', sans-serif;
+    transition: all .2s;
+  }
+  .ctab.on { background: var(--red); color: var(--cream); border-color: var(--red); }
+
+  /* Topic chips */
+  .tgrid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+  .chip {
+    font-size: 13px; padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg); cursor: pointer;
+    color: var(--dark); text-align: center;
+    font-family: 'Noto Sans TC', sans-serif;
+    transition: all .15s;
+  }
+  .chip:hover { border-color: var(--red); }
+  .chip.on { background: var(--red); color: var(--cream); border-color: var(--red); }
+
+  /* Stars */
+  .stars { display: flex; gap: 7px; margin-top: 9px; }
+  .star {
+    font-size: 28px; cursor: pointer;
+    color: var(--input-border);
+    transition: color .12s, transform .1s;
+    user-select: none; line-height: 1;
+  }
+  .star:hover { transform: scale(1.15); }
+  .star.on { color: var(--red); }
+
+  /* Submit button — #3D2B1A 底 + #FFF8C2 字 */
+  .sbtn {
+    width: 100%;
+    padding: 17px;
+    font-size: 17px;
+    font-weight: 500;
+    font-family: 'Noto Serif TC', serif;
+    border-radius: 14px;
+    background: #3D2B1A;
+    color: #FFF8C2;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    letter-spacing: .06em;
+    box-shadow: 0 4px 16px rgba(61,43,26,.35);
+    transition: opacity .2s, transform .1s;
+  }
+  .sbtn:hover { opacity: .9; }
+  .sbtn:active { transform: scale(.98); }
+  .sbtn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Toast */
+  .toast {
+    background: var(--card);
+    border-radius: 12px; padding: 13px 16px;
+    font-size: 14px; color: var(--red);
+    display: none; align-items: center;
+    gap: 9px; margin-bottom: 1rem;
+    box-shadow: 0 2px 12px rgba(61,43,26,.15);
+    animation: fadeIn .3s ease;
+  }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+
+  .fnote { font-size: 12px; color: var(--peach); text-align: center; margin-top: 11px; }
+  .footer { text-align: center; padding: 2rem 0 .5rem; color: var(--peach); font-size: 18px; letter-spacing: .3em; opacity: .6; }
+
+  /* Gemini setup notice */
+  .setup-notice {
+    background: rgba(255,248,194,.12);
+    border: 1px solid rgba(255,248,194,.25);
+    border-radius: 12px; padding: 1rem 1.2rem;
+    margin-bottom: 1rem; font-size: 13px;
+    color: var(--yellow); line-height: 1.7;
+  }
+  .setup-notice strong { color: var(--cream); }
+  .setup-notice code {
+    background: rgba(0,0,0,.25);
+    border-radius: 4px; padding: 1px 6px;
+    font-size: 12px; color: var(--yellow);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="hdr">
+    <div class="hdr-star">✦ ✦ ✦</div>
+    <h1>靈感搜集器</h1>
+    <p>貼網址或上傳截圖，一鍵歸檔到靈感宇宙</p>
+    <button onclick="toggleSettings()" style="margin-top:12px;padding:6px 18px;border-radius:99px;border:1px solid rgba(250,247,242,.4);background:transparent;color:#FAF7F2;font-size:12px;cursor:pointer;font-family:sans-serif;">⚙️ 設定 API Key</button>
+  </div>
+
+
+
+
+  <!-- 設定區塊 -->
+  <div id="settings-panel" style="display:none;">
+    <div class="sec">⚙️ 設定</div>
+    <div class="card">
+      <div class="card-title">🔑 API 設定</div>
+      <div class="slbl">Gemini API Key</div>
+      <input type="text" id="input-gemini-key" placeholder="AIzaSy..." style="margin-bottom:10px;" />
+      <div class="slbl">Apps Script 網址</div>
+      <input type="text" id="input-apps-url" placeholder="https://script.google.com/macros/s/..." style="margin-bottom:14px;" />
+      <button onclick="saveSettings()" style="width:100%;padding:12px;border-radius:12px;background:#3D2B1A;color:#FFF8C2;border:none;font-size:15px;cursor:pointer;font-family:sans-serif;">💾 儲存設定</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast">✦ <span>已成功送入靈感宇宙！</span></div>
+
+  <!-- 來源 -->
+  <div class="sec">來源</div>
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+      來源網址
+    </div>
+    <input type="url" id="url-input" placeholder="貼上 IG / 小紅書 / Pinterest / Behance 網址..." />
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      上傳截圖（選填）
+    </div>
+    <div class="upload" id="upload-area">
+      <input type="file" accept="image/*" id="file-input" />
+      <span class="upload-icon">↑</span>
+      點擊或拖曳截圖到這裡
+    </div>
+    <img id="preview" class="preview" alt="預覽截圖" />
+  </div>
+
+  <!-- 分析 -->
+  <div class="sec">AI 分析</div>
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      AI 風格描述 <span class="badge">Gemini</span>
+    </div>
+    <button class="abtn" id="abtn" onclick="doAnalyze()">✦ 自動分析風格</button>
+    <div class="slbl">分析結果</div>
+    <div class="aibox" id="aibox">按下「自動分析風格」後，AI 會自動描述這則設計的視覺風格。</div>
+  </div>
+
+  <!-- 分類 -->
+  <div class="sec">分類標籤</div>
+  <div class="card">
+    <div class="tgrid">
+      <div>
+        <div class="slbl">版型</div>
+        <select id="t-layout">
+          <option value="">選擇版型</option>
+          <option>全版</option><option>九宮格</option><option>文字主導</option>
+          <option>左右分割</option><option>上下分割</option><option>拼貼</option>
+          <option>極簡單圖</option><option>輪播</option>
+        </select>
+      </div>
+      <div>
+        <div class="slbl">色系</div>
+        <select id="t-color">
+          <option value="">選擇色系</option>
+          <option>暖色系</option><option>冷色系</option><option>黑白</option>
+          <option>大地色</option><option>莫蘭迪</option><option>螢光色</option>
+          <option>漸層</option><option>粉彩</option>
+        </select>
+      </div>
+      <div>
+        <div class="slbl">平台</div>
+        <select id="t-platform">
+          <option value="">選擇平台</option>
+          <option>Instagram</option><option>小紅書</option><option>Pinterest</option>
+          <option>Behance</option><option>Dribbble</option><option>Twitter/X</option><option>其他</option>
+        </select>
+      </div>
+      <div>
+        <div class="slbl">設計類型</div>
+        <select id="t-type">
+          <option value="">選擇類型</option>
+          <option>社群貼文</option><option>品牌設計</option><option>包裝設計</option>
+          <option>廣告素材</option><option>印刷品</option><option>UI 介面</option><option>插畫</option>
+        </select>
+      </div>
+    </div>
+    <div class="div"></div>
+    <div class="slbl">主題</div>
+    <div class="ctabs">
+      <button class="ctab on" onclick="switchCat('social',this)">自媒體</button>
+      <button class="ctab" onclick="switchCat('brand',this)">品牌 / 商業</button>
+    </div>
+    <div class="tgrid2" id="topic-grid"></div>
+    <input type="hidden" id="t-topic" />
+  </div>
+
+  <!-- 備註 -->
+  <div class="sec">備註</div>
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      備註與評分
+    </div>
+    <div class="slbl">我的備註</div>
+    <textarea id="note" placeholder="記下為何收藏、應用方向、專案用途..."></textarea>
+    <div class="slbl" style="margin-top:12px;">評分</div>
+    <div class="stars">
+      <span class="star" onclick="setR(1)">★</span>
+      <span class="star" onclick="setR(2)">★</span>
+      <span class="star" onclick="setR(3)">★</span>
+      <span class="star" onclick="setR(4)">★</span>
+      <span class="star" onclick="setR(5)">★</span>
+    </div>
+  </div>
+
+  <button class="sbtn" id="sbtn" onclick="doSubmit()">
+    🚀 儲存到靈感宇宙
+  </button>
+  <p class="fnote">需先設定 Apps Script Web App 網址才能寫入試算表</p>
+  <div class="footer">✦ ✦ ✦</div>
+
+</div>
+
+<script>
+const GEMINI_API_KEY = localStorage.getItem('gemini_key') || '';
+const APPS_SCRIPT_URL = localStorage.getItem('apps_script_url') || '';
+
+const TOPICS = {
+  social: ['時尚','美食','旅遊','美妝','生活風格','節慶','活動','攝影'],
+  brand:  ['品牌識別','包裝設計','廣告素材','型錄/EDM','戶外廣告','產品攝影','企業形象','展場設計']
+};
+let cat = 'social', sel = '', rating = 0;
+
+function switchCat(c, btn) {
+  cat = c; sel = '';
+  document.getElementById('t-topic').value = '';
+  document.querySelectorAll('.ctab').forEach(t => t.classList.remove('on'));
+  btn.classList.add('on');
+  
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
+}
+
+renderTopics();
+}
+function renderTopics() {
+  document.getElementById('topic-grid').innerHTML = TOPICS[cat].map(t =>
+    `<button class="chip${t===sel?' on':''}" onclick="selTopic('${t}')">${t}</button>`
+  ).join('');
+}
+function selTopic(t) { sel = t; document.getElementById('t-topic').value = t; 
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('input-gemini-key').value = localStorage.getItem('gemini_key') || '';
+    document.getElementById('input-apps-url').value = localStorage.getItem('apps_script_url') || '';
+  }
+}
+
+function saveSettings() {
+  const key = document.getElementById('input-gemini-key').value.trim();
+  const url = document.getElementById('input-apps-url').value.trim();
+  if (key) localStorage.setItem('gemini_key', key);
+  if (url) localStorage.setItem('apps_script_url', url);
+  document.getElementById('settings-panel').style.display = 'none';
+  alert('✅ 設定已儲存！');
+}
+
+renderTopics(); }
+function setR(n) { rating = n; document.querySelectorAll('.star').forEach((s,i) => s.classList.toggle('on', i < n)); }
+
+document.getElementById('file-input').addEventListener('change', function(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = function(ev) {
+    // 壓縮圖片再顯示，避免 base64 太大
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      const MAX = 800;
+      let w = img.width, h = img.height;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const compressed = canvas.toDataURL('image/jpeg', 0.7);
+      const p = document.getElementById('preview');
+      p.setAttribute('src', compressed);
+      p.style.cssText = 'display:block; width:100%; max-height:200px; object-fit:cover; border-radius:10px; margin-top:10px;';
+      document.getElementById('upload-area').style.display = 'none';
+    };
+    img.src = ev.target.result;
   };
   r.onerror = function() { alert('圖片讀取失敗，請重試！'); };
   r.readAsDataURL(f);
